@@ -15,7 +15,6 @@ def list_sequential_file_pairs(directory):
     files = [f for f in os.listdir(directory)
              if os.path.isfile(os.path.join(directory, f)) and re.fullmatch(r'.*[\d+]\.tif', f)]
 
-    # Sort files naturally by extracting the number before the extension
     def extract_number(filename):
         match = re.search(r'_(\d+)\.tif$', filename)
         return int(match.group(1)) if match else -1
@@ -71,11 +70,11 @@ def stitch(files, output_dir):
     final_file = os.path.join(output_dir, jpg_file)
 
     if os.path.exists(final_file) and os.path.getsize(final_file) > 100_000:
-        print(f"Output file already exists. Skipping. {final_file}")
+        #print(f"Output file already exists. Skipping. {final_file}")
         return
 
     print("Stitching...", files)
-    settings = {"detector": "sift", "confidence_threshold": 0.2}
+    settings = {"detector": "brisk", "confidence_threshold": 0.1}
     stitcher = AffineStitcher(**settings)
     combined = stitcher.stitch(files)
 
