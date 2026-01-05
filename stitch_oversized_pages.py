@@ -2,7 +2,8 @@ import cv2
 import re, os, glob
 from stitching import AffineStitcher
 
-BASE_DIR="/Users/cove/Library/CloudStorage/OneDrive-Personal/Cordell, Leslie & Audrey/Photo Albums"
+HOME = os.environ["HOME"]
+BASE_DIR = HOME + "/Library/CloudStorage/OneDrive-Personal/Cordell, Leslie & Audrey/Photo Albums"
 
 def get_view_dirname(dir):
     base, ext = os.path.splitext(dir)
@@ -11,7 +12,6 @@ def get_view_dirname(dir):
     return base + ext
 
 def list_sequential_file_pairs(directory):
-    # List all files
     files = [f for f in os.listdir(directory)
              if os.path.isfile(os.path.join(directory, f)) and re.fullmatch(r'.*[\d+]\.tif', f)]
 
@@ -21,7 +21,6 @@ def list_sequential_file_pairs(directory):
 
     files.sort(key=extract_number)
 
-    # Keep track of used files
     used = set()
     pairs = []
 
@@ -29,7 +28,6 @@ def list_sequential_file_pairs(directory):
         if f1 in used:
             continue
         num1 = extract_number(f1)
-        # Look for the next unused sequential file
         for f2 in files[i+1:]:
             if f2 in used:
                 continue
@@ -37,12 +35,11 @@ def list_sequential_file_pairs(directory):
             if num2 == num1 + 1:
                 pairs.append([os.path.join(directory, f1), os.path.join(directory, f2)])
                 used.update([f1, f2])
-                break  # stop searching for f1 once a pair is found
+                break
 
     return pairs
 
 def combine_file_names(file1, file2):
-    # Extract prefix and numbers
     pattern = r'^(.*)_(\d+)(\.\w+)$'  # matches prefix, number, extension
     match1 = re.match(pattern, os.path.basename(file1))
     match2 = re.match(pattern, os.path.basename(file2))
@@ -70,7 +67,7 @@ def stitch(files, output_dir):
     final_file = os.path.join(output_dir, jpg_file)
 
     if os.path.exists(final_file) and os.path.getsize(final_file) > 100_000:
-        #print(f"Output file already exists. Skipping. {final_file}")
+        print(f"Output file already exists. Skipping. {final_file}")
         return
 
     print("Stitching...", files)
