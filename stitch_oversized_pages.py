@@ -54,7 +54,9 @@ def combine_file_names(file1, file2):
         raise ValueError("Files do not have matching prefixes or extensions.")
 
     combined_name = f"{prefix1}_{num1}-{num2}{ext1}"
-    return combined_name
+    view_combined = combined_name.replace("_Archive_", "_View_")
+
+    return view_combined
 
 def stitch(files, output_dir):
 
