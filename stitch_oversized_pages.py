@@ -39,6 +39,50 @@ def list_sequential_file_pairs(directory):
 
     return pairs
 
+def list_sequential_file_pairs_and_partials(directory):
+    files = [
+        f for f in os.listdir(directory)
+        if os.path.isfile(os.path.join(directory, f))
+        and re.fullmatch(r'.*\d+\.tif', f)
+    ]
+
+    def extract_number(filename):
+        match = re.search(r'_(\d+)\.tif$', filename)
+        return int(match.group(1)) if match else None
+
+    files.sort(key=lambda f: extract_number(f) if extract_number(f) is not None else float("inf"))
+
+    used = set()
+    pairs = []
+
+    for i, f1 in enumerate(files):
+        if f1 in used:
+            continue
+
+        num1 = extract_number(f1)
+        paired = False
+
+        for f2 in files[i + 1:]:
+            if f2 in used:
+                continue
+
+            num2 = extract_number(f2)
+            if num1 is not None and num2 == num1 + 1:
+                pairs.append([
+                    os.path.join(directory, f1),
+                    os.path.join(directory, f2)
+                ])
+                used.update([f1, f2])
+                paired = True
+                break
+
+        if not paired:
+            pairs.append([os.path.join(directory, f1)])
+            used.add(f1)
+
+    return pairs
+
+
 def combine_file_names(file1, file2):
     pattern = r'^(.*)_(\d+)(\.\w+)$'  # matches prefix, number, extension
     match1 = re.match(pattern, os.path.basename(file1))
@@ -57,6 +101,26 @@ def combine_file_names(file1, file2):
     view_combined = combined_name.replace("_Archive_", "_View_")
 
     return view_combined
+
+def tif_to_jpg(tif_path, output_dir):
+    os.makedirs(output_dir, exist_ok=True)
+
+    base_name = os.path.splitext(os.path.basename(tif_path))[0]
+    base_name = base_name.replace("Archive", "View")
+    jpg_path = os.path.join(output_dir, base_name + ".jpg")
+
+    img = cv2.imread(tif_path, cv2.IMREAD_UNCHANGED)
+    if img is None:
+        raise ValueError(f"Could not read image: {tif_path}")
+
+    if len(img.shape) == 2:
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    elif img.shape[2] == 4:
+        img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+
+    cv2.imwrite(jpg_path, img, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+
+    return jpg_path
 
 def stitch(files, output_dir):
 
@@ -82,9 +146,14 @@ def stitch(files, output_dir):
 
 if __name__ == '__main__':
     for input_dir in glob.glob(BASE_DIR + "/*_Archive"):
-        for pair in list_sequential_file_pairs(input_dir):
+        for pair in list_sequential_file_pairs_and_partials(input_dir):
             output_dir = get_view_dirname(input_dir)
             try:
-                stitch(pair, output_dir)
+                if len(pair) == 2:
+                    stitch(pair, output_dir)
+                elif len(pair) == 1:
+                    tif_to_jpg(pair[0], output_dir)
+                else:
+                    raise ValueError("Invalid pair")
             except Exception as e:
                 print(e)
