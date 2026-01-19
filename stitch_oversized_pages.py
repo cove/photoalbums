@@ -123,13 +123,12 @@ def tif_to_jpg(tif_path, output_dir):
     return jpg_path
 
 def stitch(files, output_dir):
-
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
 
     output_file = combine_file_names(files[0], files[1])
     base_name = os.path.splitext(output_file)[0]
-    jpg_file = base_name + '.jpg'
+    jpg_file = base_name + ".jpg"
     final_file = os.path.join(output_dir, jpg_file)
 
     if os.path.exists(final_file) and os.path.getsize(final_file) > 100_000:
@@ -137,11 +136,30 @@ def stitch(files, output_dir):
         return
 
     print("Stitching...", files)
-    settings = {"detector": "brisk", "confidence_threshold": 0.1}
-    stitcher = AffineStitcher(**settings)
-    combined = stitcher.stitch(files)
 
-    print("Saving stitched file to {}".format(final_file))
+    attempts = [
+        {"detector": "sift", "confidence_threshold": 0.4},
+        {"detector": "sift", "confidence_threshold": 0.3},
+        {"detector": "brisk", "confidence_threshold": 0.2},
+        {"detector": "brisk", "confidence_threshold": 0.1},
+    ]
+    combined = None
+
+    for settings in attempts:
+        try:
+            print(f"Trying settings: {settings}")
+            stitcher = AffineStitcher(**settings)
+            combined = stitcher.stitch(files)
+
+            if combined is not None and combined.size > 0:
+                break
+        except Exception as e:
+            print(f"Failed with settings {settings}: {e}")
+
+    if combined is None:
+        raise RuntimeError("Stitching failed with all detector settings")
+
+    print(f"Saving stitched file to {final_file}")
     cv2.imwrite(final_file, combined)
 
 if __name__ == '__main__':
