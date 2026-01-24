@@ -134,7 +134,7 @@ def tif_to_jpg(tif_path, output_dir):
 
     img = add_bottom_header(
         img,
-        f"Book Author: {AUTHOR}",
+        f"Album Author: {AUTHOR}",
         f"Stitched: {datetime.now():%Y-%m-%d %H:%M:%S}",
         header
     )
@@ -178,7 +178,7 @@ def stitch(files, output_dir):
 
     result = add_bottom_header(
         result,
-        f"Book Author: {AUTHOR}",
+        f"Album Author: {AUTHOR}",
         f"Stitched: {datetime.now():%Y-%m-%d %H:%M:%S}",
         header
     )
