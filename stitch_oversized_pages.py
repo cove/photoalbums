@@ -2,7 +2,6 @@ import os, re, glob, subprocess, sys
 from datetime import datetime
 import cv2
 import numpy as np
-from setuptools.windows_support import windows_only
 from stitching import AffineStitcher
 
 # =====================
