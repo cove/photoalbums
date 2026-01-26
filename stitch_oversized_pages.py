@@ -1,15 +1,22 @@
-import os, re, glob, subprocess
+import os, re, glob, subprocess, sys
 from datetime import datetime
 import cv2
 import numpy as np
+from setuptools.windows_support import windows_only
 from stitching import AffineStitcher
 
 # =====================
 # CONFIG
 # =====================
 AUTHOR = "Audrey D. Cordell"
-HOME = os.environ["HOME"]
-BASE_DIR = f"{HOME}/Library/CloudStorage/OneDrive-Personal/Cordell, Leslie & Audrey/Photo Albums"
+if sys.platform.startswith("darwin"):
+    HOME = os.environ["HOME"]
+    BASE_DIR = f"{HOME}/Library/CloudStorage/OneDrive-Personal/Cordell, Leslie & Audrey/Photo Albums"
+elif sys.platform.startswith("win"):
+    BASE_DIR = f"C:/Users/covec/OneDrive/Cordell, Leslie & Audrey/Photo Albums"
+else:
+    raise NotImplementedError
+
 MIN_OUTPUT_SIZE = 100 * 1024  # 100 KB
 
 NEW_NAME_RE = re.compile(
