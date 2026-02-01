@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Extract metadata from image and video files into a CSV.
+Extract metadata from image and video files into a TSV.
 
 Extracts XMP, EXIF, and IPTC metadata from .tif, .jpg, .png, and .mp4 files
-in a directory tree and exports to CSV, excluding empty fields.
+in a directory tree and exports to TSV, excluding empty fields.
 """
 
 import os
@@ -61,7 +61,7 @@ EXIFTOOL_FIELDS = [
     'IPTC:Writer-Editor',
 ]
 
-OUTPUT_FILE = "metadata.csv"
+OUTPUT_FILE = "metadata.tsv"
 FILE_EXTENSIONS = ('.tif', '.tiff', '.jpg', '.jpeg', '.png', '.mp4')
 
 # Set to True to include ALL fields (even empty ones) - useful for debugging
@@ -122,8 +122,12 @@ def collect_all_metadata(files, progress=True):
 
         metadata = extract_metadata(file_path)
         if metadata:
-            # Add file path as first column
-            metadata['FilePath'] = file_path
+            # Add file path as first column (relative to Photo Albums)
+            if "Photo Albums" in file_path:
+                relative_path = "Photo Albums" + file_path.split("Photo Albums")[1]
+                metadata['FilePath'] = relative_path
+            else:
+                metadata['FilePath'] = file_path
             all_metadata.append(metadata)
 
             # Track which fields have non-empty values
@@ -146,7 +150,7 @@ def collect_all_metadata(files, progress=True):
     return all_metadata, field_has_value
 
 
-def write_csv(all_metadata, output_file):
+def write_tsv(all_metadata, output_file):
     if not all_metadata:
         print("No metadata found!")
         return
@@ -155,8 +159,8 @@ def write_csv(all_metadata, output_file):
 
     print(f"\nWriting {len(all_metadata)} records with {len(fields)} fields to {output_file}")
 
-    with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=fields, extrasaction='ignore')
+    with open(output_file, 'w', newline='', encoding='utf-8') as tsvfile:
+        writer = csv.DictWriter(tsvfile, fieldnames=fields, delimiter='\t', extrasaction='ignore')
         writer.writeheader()
 
         for metadata in all_metadata:
@@ -208,9 +212,9 @@ def main():
     # Collect metadata
     all_metadata, field_has_value = collect_all_metadata(files, progress=True)
 
-    # Write CSV
+    # Write TSV
     print()
-    write_csv(all_metadata, OUTPUT_FILE)
+    write_tsv(all_metadata, OUTPUT_FILE)
 
     print("\n" + "=" * 70)
     print("Complete!")
