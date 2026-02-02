@@ -68,9 +68,9 @@ def process_tiff_in_place(tiff_path: Path):
         return
 
     with tempfile.NamedTemporaryFile(
-        suffix=".tif",
-        dir="/tmp",
-        delete=False
+            suffix=".tif",
+            dir="/tmp",
+            delete=False
     ) as tmp:
         tmp_path = Path(tmp.name)
 
@@ -102,10 +102,19 @@ def process_tiff_in_place(tiff_path: Path):
 
 def convert_directory(base_dir: str):
     archive_dirs = glob.glob(f"{base_dir}/*_Archive")
+
+    # Collect all TIFF files from all archive directories
+    all_tiffs = []
     for archive_dir in archive_dirs:
         archive_path = Path(archive_dir)
-        for tiff_path in archive_path.rglob("*.tif"):
-            process_tiff_in_place(tiff_path)
+        all_tiffs.extend(archive_path.rglob("*.tif"))
+
+    # Sort by creation time (most recent first)
+    all_tiffs.sort(key=lambda p: p.stat().st_ctime, reverse=True)
+
+    # Process in order of most recent first
+    for tiff_path in all_tiffs:
+        process_tiff_in_place(tiff_path)
 
 
 def main():
