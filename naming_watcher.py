@@ -5,7 +5,7 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 import subprocess
 
-WATCH_DIR = r"C:/Users/covec/OneDrive/Cordell, Leslie & Audrey/Photo Albums/Europe_1973_Bxx_Archive"
+WATCH_DIR = r"C:/Users/covec/OneDrive/Cordell, Leslie & Audrey/Photo Albums/Europe_1985_B02_Archive"
 INCOMING_NAME = "incoming_scan.tif"
 
 # Regex to match filenames like: Europe_1973_Bxx_P05_S02.tif
@@ -36,7 +36,7 @@ def get_next_filename():
 
     if not valid_files:
         # No files yet — start at page 01, scan 01
-        return "Europe_1973_Bxx_P01_S01.tif"
+        return "Europe_1985_B02_P01_S01.tif"
 
     # Sort alphabetically (works because numbers are zero-padded)
     valid_files.sort()
@@ -62,7 +62,7 @@ class IncomingScanHandler(FileSystemEventHandler):
     def on_created(self, event):
         # Trigger only when incoming_scan.tif appears
         if os.path.basename(event.src_path).lower() == INCOMING_NAME.lower():
-            time.sleep(0.2)  # slight delay to ensure file is fully written
+            time.sleep(5.0)  # slight delay to ensure file is fully written
 
             new_name = get_next_filename()
             old_path = os.path.join(WATCH_DIR, INCOMING_NAME)
