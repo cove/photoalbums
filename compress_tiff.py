@@ -1,11 +1,19 @@
-import os
+import os, sys
 import glob
 import subprocess
 import tempfile
 from pathlib import Path
 
-HOME = os.environ["HOME"]
-BASE_DIR = f"{HOME}/Library/CloudStorage/OneDrive-Personal/Cordell, Leslie & Audrey/Photo Albums"
+BASE_DIR=None
+if sys.platform.startswith("darwin"):
+    HOME = os.environ["HOME"]
+    BASE_DIR = f"{HOME}/Library/CloudStorage/OneDrive-Personal/Cordell, Leslie & Audrey/Photo Albums"
+elif sys.platform.startswith("win"):
+    BASE_DIR = f"C:/Users/covec/OneDrive/Cordell, Leslie & Audrey/Photo Albums"
+    magick_path = r"C:\Program Files\ImageMagick-7.1.2-Q16-HDRI"
+    os.environ["PATH"] = magick_path + os.pathsep + os.environ["PATH"]
+else:
+    raise NotImplementedError
 
 import re
 from pathlib import Path
@@ -69,7 +77,7 @@ def process_tiff_in_place(tiff_path: Path):
 
     with tempfile.NamedTemporaryFile(
             suffix=".tif",
-            dir="/tmp",
+            dir=tempfile.gettempdir(),
             delete=False
     ) as tmp:
         tmp_path = Path(tmp.name)
