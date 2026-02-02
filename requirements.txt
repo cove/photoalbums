@@ -7,4 +7,3 @@ stitching==0.6.1
 Wand
 TiffFile
 Pillow
-watchdog
