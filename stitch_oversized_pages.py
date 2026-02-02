@@ -49,7 +49,9 @@ def parse_filename(filename):
 
 
 def count_totals(archive_dirs):
-    """Count total pages and scans per page for each collection/book"""
+    """Count total pages and scans per page for each collection/book.
+       If counted unique pages != highest page number, use highest page number.
+    """
     totals = {}
 
     for archive in archive_dirs:
@@ -60,26 +62,41 @@ def count_totals(archive_dirs):
             key = f"{collection}_{year}_B{book}"
 
             if key not in totals:
-                totals[key] = {"pages": set(), "page_scans": {}}
+                totals[key] = {
+                    "pages": set(),
+                    "page_scans": {},
+                    "max_page": 0
+                }
 
             m = re.search(r"_P(\d+)_S(\d+)", f)
             if m:
                 page_num = int(m.group(1))
                 scan_num = int(m.group(2))
-                totals[key]["pages"].add(page_num)
 
-                # Track max scan number for each page
+                totals[key]["pages"].add(page_num)
+                totals[key]["max_page"] = max(totals[key]["max_page"], page_num)
+
                 if page_num not in totals[key]["page_scans"]:
                     totals[key]["page_scans"][page_num] = 0
-                totals[key]["page_scans"][page_num] = max(totals[key]["page_scans"][page_num], scan_num)
+                totals[key]["page_scans"][page_num] = max(
+                    totals[key]["page_scans"][page_num],
+                    scan_num
+                )
 
-    # Convert sets to counts
+    # Finalize total_pages
     for key in totals:
-        totals[key]["total_pages"] = len(totals[key]["pages"])
+        unique_count = len(totals[key]["pages"])
+        highest_page = totals[key]["max_page"]
+
+        if unique_count != highest_page:
+            totals[key]["total_pages"] = highest_page
+        else:
+            totals[key]["total_pages"] = unique_count
+
         del totals[key]["pages"]
+        del totals[key]["max_page"]
 
     return totals
-
 
 def add_bottom_header(image, author, date_text, header_text, margin=15):
     """Add header using Pillow for better Unicode support (like ∅)"""
@@ -219,69 +236,6 @@ def write_jpeg(image, path, header_text):
     ], check=True)
 
 
-def get_tif_description(tif_path):
-    """Get current XMP Description from TIFF file"""
-    try:
-        result = subprocess.run([
-            "exiftool",
-            "-XMP-dc:Description",
-            "-s3",  # Short format, values only
-            tif_path
-        ], capture_output=True, text=True, check=True)
-        return result.stdout.strip()
-    except Exception:
-        return None
-
-
-def get_tif_creator(tif_path):
-    """Get current XMP Creator from TIFF file"""
-    try:
-        result = subprocess.run([
-            "exiftool",
-            "-XMP-dc:Creator",
-            "-s3",  # Short format, values only
-            tif_path
-        ], capture_output=True, text=True, check=True)
-        return result.stdout.strip()
-    except Exception:
-        return None
-
-
-def update_tif_metadata(tif_path, header_text):
-    """Update XMP metadata in TIFF file only if different, preserving all existing metadata"""
-    current_desc = get_tif_description(tif_path)
-    current_creator = get_tif_creator(tif_path)
-
-    # Check if Creator has been duplicated (contains the name more than once)
-    creator_needs_fix = False
-    if current_creator and current_creator.count(CREATOR) > 1:
-        creator_needs_fix = True
-
-    # Check if we need to update at all
-    if current_desc == header_text and not creator_needs_fix and current_creator == CREATOR:
-        return False  # No update needed
-
-    # If Creator is duplicated, clear it first then set it
-    if creator_needs_fix:
-        subprocess.run([
-            "exiftool",
-            "-overwrite_original",
-            "-XMP-dc:Creator=",  # Clear the field
-            tif_path
-        ], check=True)
-
-    # Set Creator and Description
-    subprocess.run([
-        "exiftool",
-        "-overwrite_original",
-        f"-XMP-dc:Creator={CREATOR}",
-        f"-XMP-dc:Description={header_text}",
-        tif_path
-    ], check=True)
-
-    return True  # Updated
-
-
 def tif_to_jpg(tif_path, output_dir, totals):
     os.makedirs(output_dir, exist_ok=True)
     out = os.path.join(
@@ -305,20 +259,8 @@ def tif_to_jpg(tif_path, output_dir, totals):
     book_display = "Ø" if book == "∅" else f"{int(book):02d}"
     jpg_header = f"{collection} ({year}) - Book {book_display}, Page {int(page):02d} of {total_pages:02d}, Scans {scans_text} of {total_scans_for_page} total"
 
-    # Build header for TIFF - use ∅ in metadata (text-only, no rendering issues)
-    tif_book_display = book if book == "∅" else f"{int(book):02d}"
-    tif_header = f"{collection} ({year}) - Book {tif_book_display}, Page {int(page):02d} of {total_pages:02d}, Scan S{scan_num:02d} of {total_scans_for_page} total"
-
     if output_is_valid(out):
         print("Skipping existing:", os.path.basename(out))
-        # Still update TIFF metadata even if JPG exists
-        try:
-            if update_tif_metadata(tif_path, tif_header):
-                print(f"  Updated TIFF metadata for {os.path.basename(tif_path)}")
-            else:
-                print(f"  TIFF metadata already current for {os.path.basename(tif_path)}")
-        except Exception as e:
-            print(f"  Warning: Could not update TIFF metadata for {os.path.basename(tif_path)}: {e}")
         return
 
     img = cv2.imread(tif_path, cv2.IMREAD_UNCHANGED)
@@ -339,17 +281,7 @@ def tif_to_jpg(tif_path, output_dir, totals):
 
     write_jpeg(img, out, jpg_header)
 
-    # Update TIFF metadata
-    try:
-        if update_tif_metadata(tif_path, tif_header):
-            print("  Updated TIFF metadata")
-        else:
-            print("  TIFF metadata already current")
-    except Exception as e:
-        print(f"  Warning: Could not update TIFF metadata: {e}")
-
     print("Saved:", out)
-
 
 def stitch(files, output_dir, totals):
     os.makedirs(output_dir, exist_ok=True)
@@ -376,24 +308,8 @@ def stitch(files, output_dir, totals):
     book_display = "Ø" if book == "∅" else f"{int(book):02d}"
     header = f"{collection} ({year}) - Book {book_display}, Page {int(page):02d} of {total_pages:02d}, Scans {scans_text} of {total_scans_for_page} total"
 
-    # For TIFF metadata, use the actual ∅ symbol
-    tif_book_display = book if book == "∅" else f"{int(book):02d}"
-
     if output_is_valid(out):
         print("Skipping existing:", os.path.basename(out))
-        # Still update TIFF metadata for all source files
-        for tif_path in files:
-            m = re.search(r"_S(\d+)", tif_path)
-            scan_num = int(m.group(1)) if m else 1
-            # Each TIFF shows only its own scan number - use ∅ in metadata
-            tif_header = f"{collection} ({year}) - Book {tif_book_display}, Page {int(page):02d} of {total_pages:02d}, Scan S{scan_num:02d} of {total_scans_for_page} total"
-            try:
-                if update_tif_metadata(tif_path, tif_header):
-                    print(f"  Updated TIFF metadata for {os.path.basename(tif_path)}")
-                else:
-                    print(f"  TIFF metadata already current for {os.path.basename(tif_path)}")
-            except Exception as e:
-                print(f"  Warning: Could not update TIFF metadata for {os.path.basename(tif_path)}: {e}")
         return
 
     print("Stitching:", [os.path.basename(f) for f in files])
@@ -424,22 +340,24 @@ def stitch(files, output_dir, totals):
 
     write_jpeg(result, out, header)
 
-    # Update TIFF metadata for all source files
-    for tif_path in files:
-        m = re.search(r"_S(\d+)", tif_path)
-        scan_num = int(m.group(1)) if m else 1
-        # Each TIFF shows only its own scan number - use ∅ in metadata
-        tif_header = f"{collection} ({year}) - Book {tif_book_display}, Page {int(page):02d} of {total_pages:02d}, Scan S{scan_num:02d} of {total_scans_for_page} total"
-        try:
-            if update_tif_metadata(tif_path, tif_header):
-                print(f"  Updated TIFF metadata for {os.path.basename(tif_path)}")
-            else:
-                print(f"  TIFF metadata already current for {os.path.basename(tif_path)}")
-        except Exception as e:
-            print(f"  Warning: Could not update TIFF metadata for {os.path.basename(tif_path)}: {e}")
-
     print("Saved stitched:", out)
 
+def dir_created_ts(p: str) -> float:
+    """
+    Return a sortable timestamp for "created".
+    - macOS: st_birthtime if available
+    - Windows: st_ctime is creation time
+    - Linux: no true creation time; fall back to mtime
+    """
+    st = os.stat(p)
+    # macOS (and some BSDs) expose birth time
+    if hasattr(st, "st_birthtime"):
+        return float(st.st_birthtime)
+    # Windows: st_ctime is creation time; Linux: it's metadata-change time
+    # so prefer mtime on Linux-ish systems.
+    if sys.platform.startswith("win"):
+        return float(st.st_ctime)
+    return float(st.st_mtime)
 
 # =====================
 # MAIN
@@ -450,6 +368,8 @@ if __name__ == "__main__":
 
     # Get all archive directories
     archive_dirs = glob.glob(f"{BASE_DIR}/*_Archive")
+
+    archive_dirs.sort(key=dir_created_ts, reverse=True)
 
     # Count totals across all archives
     print("Counting total pages and scans per book...")
