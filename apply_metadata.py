@@ -184,17 +184,17 @@ if __name__ == "__main__":
         key = f"{collection}_{year}_B{book}"
         total_pages = totals.get(key, {}).get("total_pages", 0)
         page_num = int(page)
-            total_scans_for_page = totals.get(key, {}).get("page_scans", {}).get(page_num, 1)
+        total_scans_for_page = totals.get(key, {}).get("page_scans", {}).get(page_num, 1)
 
-            m = re.search(r"_S(\d+)", f)
-            scan_num = int(m.group(1)) if m else 1
+        m = re.search(r"_S(\d+)", f)
+        scan_num = int(m.group(1)) if m else 1
 
-            tif_book_display = book if book == "∅" else f"{int(book):02d}"
-            header = (
-                f"{collection} ({year}) - Book {tif_book_display}, "
-                f"Page {int(page):02d} of {total_pages:02d}, "
-                f"Scan S{scan_num:02d} of {total_scans_for_page} total"
-            )
+        tif_book_display = book if book == "∅" else f"{int(book):02d}"
+        header = (
+            f"{collection} ({year}) - Book {tif_book_display}, "
+            f"Page {int(page):02d} of {total_pages:02d}, "
+            f"Scan S{scan_num:02d} of {total_scans_for_page} total"
+        )
 
         try:
             if update_tif_metadata(tif_path, header):
