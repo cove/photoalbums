@@ -21,6 +21,37 @@ FILENAME_PATTERN = re.compile(
 
 PAGE_SCAN_RE = re.compile(r"_P(?P<page>\d+)_S(?P<scan>\d+)", re.IGNORECASE)
 
+COLOR_GREEN = "\x1b[32m"
+COLOR_RED = "\x1b[31m"
+COLOR_YELLOW = "\x1b[33m"
+COLOR_RESET = "\x1b[0m"
+
+
+def _supports_color():
+    return sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
+
+
+def _colorize(text, color):
+    if not _supports_color():
+        return text
+    return f"{color}{text}{COLOR_RESET}"
+
+
+def log_ok(message):
+    print(_colorize(message, COLOR_GREEN))
+
+
+def log_warn(message):
+    print(_colorize(message, COLOR_YELLOW))
+
+
+def log_error(message):
+    print(_colorize(message, COLOR_RED))
+
+
+def log_info(message):
+    print(message)
+
 
 def configure_imagemagick():
     if sys.platform.startswith("win"):
@@ -88,14 +119,13 @@ def validate_pixels(original_path: Path, converted_path: Path) -> bool:
         diff_count = int(result.stderr.strip().split()[0])
         return diff_count == 0
     except Exception as e:
-        print(f"Validation error for {original_path}: {e}")
+        log_error(f"{original_path.name} validation error: {e}")
         return False
 
 
-def process_tiff_in_place(tiff_path: Path):
+def process_tiff_in_place(tiff_path: Path) -> bool:
     if not tiff_needs_conversion(tiff_path):
-        print(f"Skipped (already correct): {tiff_path}")
-        return
+        return True
 
     with tempfile.NamedTemporaryFile(
         suffix=".tif",
@@ -121,16 +151,17 @@ def process_tiff_in_place(tiff_path: Path):
         )
 
         if not validate_pixels(tiff_path, tmp_path):
-            print(f"Pixel mismatch, not replacing: {tiff_path}")
+            log_error(f"{tiff_path.name} pixel mismatch; not replacing")
             tmp_path.unlink(missing_ok=True)
-            return
+            return False
 
         tmp_path.replace(tiff_path)
-        print(f"Processed and replaced: {tiff_path}")
+        return True
 
     except subprocess.CalledProcessError as e:
-        print(f"Error processing {tiff_path}: {e}")
+        log_error(f"{tiff_path.name} processing error: {e}")
         tmp_path.unlink(missing_ok=True)
+        return False
 
 
 def get_next_filename(watch_dir):
@@ -189,7 +220,7 @@ def list_page_scans(directory, page_num):
     return files
 
 
-def validate_stitch(files):
+def validate_stitch(files) -> bool:
     if len(files) < 2:
         return True
 
@@ -202,49 +233,77 @@ def validate_stitch(files):
         try:
             result = AffineStitcher(**cfg).stitch(files)
             if result is not None and getattr(result, "size", 0):
-                print("OK: stitch " + ", ".join(os.path.basename(f) for f in files))
                 return True
         except Exception:
             continue
 
-    print("Error: failed to stitch " + ", ".join(os.path.basename(f) for f in files))
     return False
 
 
 class IncomingScanHandler(FileSystemEventHandler):
+    def __init__(self):
+        super().__init__()
+        self.retry_pages = {}
+
+    def _get_retry_filename(self, watch_dir, page_num):
+        files = list_page_scans(watch_dir, page_num)
+        if files:
+            last = files[-1]
+            m = PAGE_SCAN_RE.search(last)
+            scan = (int(m.group("scan")) if m else 1) + 1
+        else:
+            scan = 1
+        prefix = derive_prefix(watch_dir)
+        return f"{prefix}_P{page_num:02d}_S{scan:02d}.tif"
+
     def on_created(self, event):
         if event.is_directory:
             return
         if os.path.basename(event.src_path).lower() != INCOMING_NAME.lower():
             return
 
-        time.sleep(5.0)
+        time.sleep(2.0)
 
         watch_dir = os.path.dirname(event.src_path)
-        new_name = get_next_filename(watch_dir)
+        retry_page = self.retry_pages.get(watch_dir)
+        if retry_page is not None:
+            new_name = self._get_retry_filename(watch_dir, retry_page)
+        else:
+            new_name = get_next_filename(watch_dir)
         old_path = os.path.join(watch_dir, INCOMING_NAME)
         new_path = os.path.join(watch_dir, new_name)
 
-        print(f"Renaming {INCOMING_NAME} -> {new_name}")
         os.rename(old_path, new_path)
 
-        process_tiff_in_place(Path(new_path))
+        if not process_tiff_in_place(Path(new_path)):
+            log_error(f"{Path(new_name).name} ERROR")
+            return
+
         open_image_fullscreen(new_path)
 
         page_match = PAGE_SCAN_RE.search(new_name)
         if not page_match:
+            log_ok(f"{Path(new_name).name} OK")
             return
 
         page_num = int(page_match.group("page"))
         files = list_page_scans(watch_dir, page_num)
         if len(files) >= 2:
-            validate_stitch(files)
+            if validate_stitch(files):
+                if retry_page == page_num:
+                    self.retry_pages.pop(watch_dir, None)
+                log_ok(f"{Path(new_name).name} OK")
+            else:
+                self.retry_pages[watch_dir] = page_num
+                log_error(f"{Path(new_name).name} STITCH FAILED")
+        else:
+            log_ok(f"{Path(new_name).name} OK")
 
 
 def main():
     configure_imagemagick()
-    print(f"Watching for {INCOMING_NAME} in:")
-    print(WATCH_ROOT)
+    log_info(f"Watching for {INCOMING_NAME} in:")
+    log_info(WATCH_ROOT)
 
     event_handler = IncomingScanHandler()
     observer = Observer()
