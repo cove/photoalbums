@@ -24,79 +24,46 @@ NEW_NAME_RE = re.compile(
     re.IGNORECASE
 )
 
+DERIVED_RE = re.compile(r"_D(?P<d1>\d{2})_(?P<d2>\d{2})", re.IGNORECASE)
+
 FILENAME_RE = re.compile(
     r"(?P<collection>[A-Z]+)_(?P<year>\d{4}(?:-\d{4})?)_B(?P<book>\d{2}|∅)_P(?P<page>\d+)_S\d+",
     re.IGNORECASE
 )
 
+FILENAME_RE_NO_SCAN = re.compile(
+    r"(?P<collection>[A-Z]+)_(?P<year>\d{4}(?:-\d{4})?)_B(?P<book>\d{2}|∅)_P(?P<page>\d+)",
+    re.IGNORECASE
+)
+IMAGE_EXTS = (".tif", ".tiff", ".jpg", ".jpeg", ".png", ".bmp")
 
 # =====================
 # HELPERS
 # =====================
-def output_is_valid(path):
-    return os.path.exists(path) and os.path.getsize(path) > MIN_OUTPUT_SIZE
+def output_is_valid(path, min_size=MIN_OUTPUT_SIZE):
+    return os.path.exists(path) and os.path.getsize(path) > min_size
 
 
 def get_view_dirname(path):
-    return path.replace("_Archive", "_View")
+    base = os.path.basename(path)
+    base_no_archive = base.replace("_Archive", "")
+    m = re.match(r"^(?P<collection>[A-Za-z]+)_(?P<year>\d{4}(?:-\d{4})?)_(?P<rest>.+)$", base_no_archive)
+    if m:
+        collection = m.group("collection")
+        year = m.group("year")
+        rest = m.group("rest")
+        return os.path.join(os.path.dirname(path), f"{year}_{collection}_{rest}_View")
+    return os.path.join(os.path.dirname(path), f"{base_no_archive}_View")
 
 
 def parse_filename(filename):
     m = FILENAME_RE.search(filename)
     if not m:
+        m = FILENAME_RE_NO_SCAN.search(filename)
+    if not m:
         return ("Unknown", "Unknown", "00", "00")
     return m.group("collection"), m.group("year"), m.group("book"), m.group("page")
 
-
-def count_totals(archive_dirs):
-    """Count total pages and scans per page for each collection/book.
-       If counted unique pages != highest page number, use highest page number.
-    """
-    totals = {}
-
-    for archive in archive_dirs:
-        files = [f for f in os.listdir(archive) if NEW_NAME_RE.fullmatch(f)]
-
-        for f in files:
-            collection, year, book, page = parse_filename(f)
-            key = f"{collection}_{year}_B{book}"
-
-            if key not in totals:
-                totals[key] = {
-                    "pages": set(),
-                    "page_scans": {},
-                    "max_page": 0
-                }
-
-            m = re.search(r"_P(\d+)_S(\d+)", f)
-            if m:
-                page_num = int(m.group(1))
-                scan_num = int(m.group(2))
-
-                totals[key]["pages"].add(page_num)
-                totals[key]["max_page"] = max(totals[key]["max_page"], page_num)
-
-                if page_num not in totals[key]["page_scans"]:
-                    totals[key]["page_scans"][page_num] = 0
-                totals[key]["page_scans"][page_num] = max(
-                    totals[key]["page_scans"][page_num],
-                    scan_num
-                )
-
-    # Finalize total_pages
-    for key in totals:
-        unique_count = len(totals[key]["pages"])
-        highest_page = totals[key]["max_page"]
-
-        if unique_count != highest_page:
-            totals[key]["total_pages"] = highest_page
-        else:
-            totals[key]["total_pages"] = unique_count
-
-        del totals[key]["pages"]
-        del totals[key]["max_page"]
-
-    return totals
 
 def add_bottom_header(image, author, date_text, header_text, margin=15):
     """Add header using Pillow for better Unicode support (like ∅)"""
@@ -221,12 +188,33 @@ def list_page_scans(directory):
 
     return list(pages.values())
 
+def list_derived_images(directory):
+    files = []
+    for name in os.listdir(directory):
+        if not name.lower().endswith(IMAGE_EXTS):
+            continue
+        if not DERIVED_RE.search(name):
+            continue
+        files.append(os.path.join(directory, name))
+
+    def key(path):
+        base = os.path.basename(path)
+        m_page = FILENAME_RE.search(base) or FILENAME_RE_NO_SCAN.search(base)
+        m_d = DERIVED_RE.search(base)
+        page = int(m_page.group("page")) if m_page else 0
+        d1 = int(m_d.group("d1")) if m_d else 0
+        d2 = int(m_d.group("d2")) if m_d else 0
+        return page, d1, d2, base.lower()
+
+    files.sort(key=key)
+    return files
+
 
 # =====================
 # IMAGE OUTPUT
 # =====================
-def write_jpeg(image, path, header_text):
-    cv2.imwrite(path, image, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+def write_jpeg(image, path, header_text, quality=95):
+    cv2.imwrite(path, image, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
     subprocess.run([
         "exiftool",
         "-overwrite_original",
@@ -236,31 +224,26 @@ def write_jpeg(image, path, header_text):
     ], check=True)
 
 
-def tif_to_jpg(tif_path, output_dir, totals):
+def tif_to_jpg(tif_path, output_dir):
     os.makedirs(output_dir, exist_ok=True)
+    collection, year, book, page = parse_filename(tif_path)
     out = os.path.join(
         output_dir,
-        os.path.splitext(os.path.basename(tif_path))[0].replace("Archive", "View") + ".jpg"
+        f"{year}_{collection}_B{book}_P{int(page):02d}.jpg"
     )
-
-    collection, year, book, page = parse_filename(tif_path)
-    key = f"{collection}_{year}_B{book}"
-    total_pages = totals.get(key, {}).get("total_pages", 0)
-    page_num = int(page)
-    total_scans_for_page = totals.get(key, {}).get("page_scans", {}).get(page_num, 1)
 
     # Get scan number from filename
     m = re.search(r"_S(\d+)", tif_path)
     scan_num = int(m.group(1)) if m else 1
 
-    # Build scans text for JPG - list all scans for this page
-    scans_text = " ".join(f"S{s:02d}" for s in range(1, total_scans_for_page + 1))
+    # Build scans text for JPG
+    scans_text = f"S{scan_num:02d}"
     # Format book number - use Ø (more widely supported) for empty set, otherwise format as 2-digit number
     book_display = "Ø" if book == "∅" else f"{int(book):02d}"
-    jpg_header = f"{collection} ({year}) - Book {book_display}, Page {int(page):02d} of {total_pages:02d}, Scans {scans_text} of {total_scans_for_page} total"
+    jpg_header = f"{collection} ({year}) - Book {book_display}, Page {int(page):02d}, Scans {scans_text}"
 
     if output_is_valid(out):
-        print("Skipping existing:", os.path.basename(out))
+        print(f"{collection} B{book} P{int(page):02d} OK")
         return
 
     img = cv2.imread(tif_path, cv2.IMREAD_UNCHANGED)
@@ -281,19 +264,78 @@ def tif_to_jpg(tif_path, output_dir, totals):
 
     write_jpeg(img, out, jpg_header)
 
-    print("Saved:", out)
+    print(f"{collection} B{book} P{int(page):02d} OK")
 
-def stitch(files, output_dir, totals):
+def derived_to_jpg(src_path, output_dir):
+    os.makedirs(output_dir, exist_ok=True)
+
+    base = os.path.basename(src_path)
+    collection, year, book, page = parse_filename(base)
+    m_d = DERIVED_RE.search(base)
+    d1 = m_d.group("d1") if m_d else "00"
+    d2 = m_d.group("d2") if m_d else "00"
+
+    if collection != "Unknown":
+        out_name = f"{year}_{collection}_B{book}_P{int(page):02d}_D{d1}_{d2}.jpg"
+    else:
+        stem, _ = os.path.splitext(base)
+        m_view = re.match(r"^(?P<collection>[A-Za-z]+)_(?P<year>\d{4}(?:-\d{4})?)_(?P<rest>.+)$", stem)
+        if m_view:
+            out_name = f"{m_view.group('year')}_{m_view.group('collection')}_{m_view.group('rest')}_D{d1}_{d2}.jpg"
+        else:
+            out_name = f"{stem}_D{d1}_{d2}.jpg"
+
+    out = os.path.join(output_dir, out_name)
+
+    if output_is_valid(out, min_size=1):
+        if collection != "Unknown":
+            print(f"{collection} B{book} P{int(page):02d} D{d1}_{d2} OK")
+        else:
+            print(f"{out_name} OK")
+        return
+
+    img = cv2.imread(src_path, cv2.IMREAD_UNCHANGED)
+    if img is None:
+        return
+
+    if img.ndim == 2:
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    elif img.shape[2] == 4:
+        img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+
+    # No footer for derived images.
+    if collection != "Unknown":
+        book_display = "Ø" if book == "∅" else f"{int(book):02d}"
+        desc = (
+            f"{collection} ({year}) - Book {book_display}, "
+            f"Page {int(page):02d}, Detail D{d1}_{d2}"
+        )
+    else:
+        desc = ""
+
+    original_size = os.path.getsize(src_path)
+    quality = 80
+    write_jpeg(img, out, desc, quality=quality)
+
+    # Ensure derived output is smaller than original when possible.
+    while os.path.exists(out) and os.path.getsize(out) >= original_size and quality > 40:
+        quality -= 10
+        write_jpeg(img, out, desc, quality=quality)
+
+    if collection != "Unknown":
+        print(f"{collection} B{book} P{int(page):02d} D{d1}_{d2} OK")
+    else:
+        print(f"{out_name} OK")
+
+def stitch(files, output_dir):
     os.makedirs(output_dir, exist_ok=True)
 
     collection, year, book, page = parse_filename(files[0])
-    key = f"{collection}_{year}_B{book}"
-    total_pages = totals.get(key, {}).get("total_pages", 0)
-    page_num = int(page)
-    total_scans_for_page = totals.get(key, {}).get("page_scans", {}).get(page_num, len(files))
 
-    base = re.sub(r"_P\d+_S\d+\.tif$", "", os.path.basename(files[0]))
-    out = os.path.join(output_dir, f"{base}_P{int(page):02d}_stitched.jpg")
+    out = os.path.join(
+        output_dir,
+        f"{year}_{collection}_B{book}_P{int(page):02d}_stitched.jpg"
+    )
 
     # Get scan numbers for the files being stitched
     scan_nums = []
@@ -306,13 +348,11 @@ def stitch(files, output_dir, totals):
     scans_text = " ".join(f"S{s:02d}" for s in scan_nums)
     # Format book number - use Ø (more widely supported) for images, ∅ for metadata
     book_display = "Ø" if book == "∅" else f"{int(book):02d}"
-    header = f"{collection} ({year}) - Book {book_display}, Page {int(page):02d} of {total_pages:02d}, Scans {scans_text} of {total_scans_for_page} total"
+    header = f"{collection} ({year}) - Book {book_display}, Page {int(page):02d}, Scans {scans_text}"
 
     if output_is_valid(out):
-        print("Skipping existing:", os.path.basename(out))
+        print(f"{collection} B{book} P{int(page):02d} OK")
         return
-
-    print("Stitching:", [os.path.basename(f) for f in files])
 
     attempts = [
         {"detector": "sift", "confidence_threshold": 0.3},
@@ -340,7 +380,7 @@ def stitch(files, output_dir, totals):
 
     write_jpeg(result, out, header)
 
-    print("Saved stitched:", out)
+    print(f"{collection} B{book} P{int(page):02d} OK")
 
 def dir_created_ts(p: str) -> float:
     """
@@ -371,32 +411,44 @@ if __name__ == "__main__":
 
     archive_dirs.sort(key=dir_created_ts, reverse=True)
 
-    # Count totals across all archives
-    print("Counting total pages and scans per book...")
-    totals = count_totals(archive_dirs)
-
-    for key, data in totals.items():
-        total_scans = sum(data['page_scans'].values())
-        print(f"{key}: {data['total_pages']} pages, {total_scans} total scans")
-    print()
-
     for archive in archive_dirs:
         view = get_view_dirname(archive)
 
         for group in list_page_scans(archive):
             try:
                 if len(group) > 1:
-                    stitch(group, view, totals)
+                    stitch(group, view)
                 else:
-                    tif_to_jpg(group[0], view, totals)
+                    tif_to_jpg(group[0], view)
                 success += 1
             except Exception as e:
                 failures += 1
                 failed.append(group)
                 print("Error:", e)
 
+        for derived in list_derived_images(archive):
+            try:
+                derived_to_jpg(derived, view)
+                success += 1
+            except Exception as e:
+                failures += 1
+                failed.append([derived])
+                print("Error:", e)
+
     print("\n===== SUMMARY =====")
     print("Successful:", success)
     print("Failed:", failures)
+    if failed:
+        print("\n===== FAILURES (DETAILS) =====")
+        for group in failed:
+            if group:
+                c, y, b, p = parse_filename(group[0])
+                base = f"{y}_{c}_B{b}_P{int(p):02d}"
+            else:
+                base = "Unknown"
+            print(f"FAILED: {base}")
+            print("Files:")
+            for f in group:
+                print(f"  - {f}")
     for f in failed:
         print(" -", ", ".join(os.path.basename(x) for x in f))
