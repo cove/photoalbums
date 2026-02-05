@@ -1,4 +1,5 @@
 import os, re, glob, sys
+import warnings
 import cv2
 from stitching import AffineStitcher
 
@@ -16,12 +17,12 @@ else:
 
 
 NEW_NAME_RE = re.compile(
-    r"^[A-Z]{2,}_\d{4}(?:-\d{4})?_B(?:\d{2}|∅)_P\d{2}_S\d{2}\.tif$",
+    r"^[A-Z]{2,}_\d{4}(?:-\d{4})?_B\d{2}_P\d{2}_S\d{2}\.tif$",
     re.IGNORECASE
 )
 
 FILENAME_RE = re.compile(
-    r"(?P<collection>[A-Z]+)_(?P<year>\d{4}(?:-\d{4})?)_B(?P<book>\d{2}|∅)_P(?P<page>\d+)_S\d+",
+    r"(?P<collection>[A-Z]+)_(?P<year>\d{4}(?:-\d{4})?)_B(?P<book>\d{2})_P(?P<page>\d+)_S\d+",
     re.IGNORECASE
 )
 
@@ -129,15 +130,34 @@ def validate_stitch(files):
     ]
 
     result = None
+    partial_warning = None
     for cfg in attempts:
         try:
-            result = AffineStitcher(**cfg).stitch(files)
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                result = AffineStitcher(**cfg).stitch(files)
+            partial_warning = next(
+                (
+                    w
+                    for w in caught
+                    if "not all images are included in the final panorama"
+                    in str(w.message).lower()
+                ),
+                None,
+            )
+            if partial_warning is not None:
+                result = None
+                continue
             if result is not None and result.size:
                 break
         except Exception:
             pass
 
     if result is None:
+        if partial_warning is not None:
+            raise RuntimeError(
+                "Stitching produced a partial panorama (not all scans were included)"
+            )
         raise RuntimeError("All stitching attempts failed")
 
 def dir_created_ts(p: str) -> float:

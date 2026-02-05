@@ -1,5 +1,6 @@
 import os, re, glob, subprocess, sys
 from datetime import datetime
+import warnings
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
@@ -20,19 +21,19 @@ else:
 MIN_OUTPUT_SIZE = 100 * 1024  # 100 KB
 
 NEW_NAME_RE = re.compile(
-    r"^[A-Z]{2,}_\d{4}(?:-\d{4})?_B(?:\d{2}|∅)_P\d{2}_S\d{2}\.tif$",
+    r"^[A-Z]{2,}_\d{4}(?:-\d{4})?_B\d{2}_P\d{2}_S\d{2}\.tif$",
     re.IGNORECASE
 )
 
 DERIVED_RE = re.compile(r"_D(?P<d1>\d{2})_(?P<d2>\d{2})", re.IGNORECASE)
 
 FILENAME_RE = re.compile(
-    r"(?P<collection>[A-Z]+)_(?P<year>\d{4}(?:-\d{4})?)_B(?P<book>\d{2}|∅)_P(?P<page>\d+)_S\d+",
+    r"(?P<collection>[A-Z]+)_(?P<year>\d{4}(?:-\d{4})?)_B(?P<book>\d{2})_P(?P<page>\d+)_S\d+",
     re.IGNORECASE
 )
 
 FILENAME_RE_NO_SCAN = re.compile(
-    r"(?P<collection>[A-Z]+)_(?P<year>\d{4}(?:-\d{4})?)_B(?P<book>\d{2}|∅)_P(?P<page>\d+)",
+    r"(?P<collection>[A-Z]+)_(?P<year>\d{4}(?:-\d{4})?)_B(?P<book>\d{2})_P(?P<page>\d+)",
     re.IGNORECASE
 )
 IMAGE_EXTS = (".tif", ".tiff", ".jpg", ".jpeg", ".png", ".bmp")
@@ -66,7 +67,7 @@ def parse_filename(filename):
 
 
 def add_bottom_header(image, author, date_text, header_text, margin=15):
-    """Add header using Pillow for better Unicode support (like ∅)"""
+    """Add header using Pillow for better Unicode support."""
     # Convert from BGR (OpenCV) to RGB (Pillow)
     image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     pil_image = Image.fromarray(image_rgb)
@@ -238,8 +239,7 @@ def tif_to_jpg(tif_path, output_dir):
 
     # Build scans text for JPG
     scans_text = f"S{scan_num:02d}"
-    # Format book number - use Ø (more widely supported) for empty set, otherwise format as 2-digit number
-    book_display = "Ø" if book == "∅" else f"{int(book):02d}"
+    book_display = f"{int(book):02d}"
     jpg_header = f"{collection} ({year}) - Book {book_display}, Page {int(page):02d}, Scans {scans_text}"
 
     if output_is_valid(out):
@@ -305,7 +305,7 @@ def derived_to_jpg(src_path, output_dir):
 
     # No footer for derived images.
     if collection != "Unknown":
-        book_display = "Ø" if book == "∅" else f"{int(book):02d}"
+        book_display = f"{int(book):02d}"
         desc = (
             f"{collection} ({year}) - Book {book_display}, "
             f"Page {int(page):02d}, Detail D{d1}_{d2}"
@@ -346,8 +346,7 @@ def stitch(files, output_dir):
 
     # Format: "Scans S01 S02 S03 of 3 total"
     scans_text = " ".join(f"S{s:02d}" for s in scan_nums)
-    # Format book number - use Ø (more widely supported) for images, ∅ for metadata
-    book_display = "Ø" if book == "∅" else f"{int(book):02d}"
+    book_display = f"{int(book):02d}"
     header = f"{collection} ({year}) - Book {book_display}, Page {int(page):02d}, Scans {scans_text}"
 
     if output_is_valid(out):
@@ -356,19 +355,39 @@ def stitch(files, output_dir):
 
     attempts = [
         {"detector": "sift", "confidence_threshold": 0.3},
+        {"detector": "sift", "confidence_threshold": 0.1},
         {"detector": "brisk", "confidence_threshold": 0.1},
     ]
 
     result = None
+    partial_warning = None
     for cfg in attempts:
         try:
-            result = AffineStitcher(**cfg).stitch(files)
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                result = AffineStitcher(**cfg).stitch(files)
+            partial_warning = next(
+                (
+                    w
+                    for w in caught
+                    if "not all images are included in the final panorama"
+                    in str(w.message).lower()
+                ),
+                None,
+            )
+            if partial_warning is not None:
+                result = None
+                continue
             if result is not None and result.size:
                 break
         except Exception:
             pass
 
     if result is None:
+        if partial_warning is not None:
+            raise RuntimeError(
+                "Stitching produced a partial panorama (not all scans were included)"
+            )
         raise RuntimeError("All stitching attempts failed")
 
     result = add_bottom_header(
