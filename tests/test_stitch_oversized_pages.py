@@ -45,7 +45,7 @@ class TestStitchOversizedPages(unittest.TestCase):
     def test_get_view_dirname(self):
         base = Path("C:/Photos/EU_1973_B02_Archive")
         view = sop.get_view_dirname(base)
-        self.assertEqual(Path(view), Path("C:/Photos/1973_EU_B02_View"))
+        self.assertEqual(Path(view), Path("C:/Photos/EU_1973_B02_View"))
 
 
 if __name__ == "__main__":

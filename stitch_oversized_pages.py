@@ -144,7 +144,7 @@ def get_view_dirname(path: str | Path) -> str:
         collection = match.group("collection")
         year = match.group("year")
         rest = match.group("rest")
-        return str(Path(path).parent / f"{year}_{collection}_{rest}_View")
+        return str(Path(path).parent / f"{collection}_{year}_{rest}_View")
     return str(Path(path).parent / f"{base_no_archive}_View")
 
 
