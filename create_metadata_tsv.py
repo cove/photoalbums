@@ -1,172 +1,138 @@
 #!/usr/bin/env python3
 """
 Extract metadata from image and video files into a TSV.
-
-Extracts XMP, EXIF, and IPTC metadata from .tif, .jpg, .png, and .mp4 files
-in a directory tree and exports to TSV, excluding empty fields.
 """
 
-import os
-import sys
-import subprocess
-import json
 import csv
+import json
+import subprocess
+import sys
 from pathlib import Path
-from collections import defaultdict
 
-# =====================
-# CONFIG
-# =====================
-if sys.platform.startswith("darwin"):
-    HOME = os.environ["HOME"]
-    BASE_DIR = f"{HOME}/Library/CloudStorage/OneDrive-Personal/Cordell, Leslie & Audrey/Photo Albums"
-elif sys.platform.startswith("win"):
-    BASE_DIR = f"C:/Users/covec/OneDrive/Cordell, Leslie & Audrey/Photo Albums"
-else:
-    raise NotImplementedError
+from common import PHOTO_ALBUMS_DIR
 
-# =====================
-# METADATA FIELDS TO EXTRACT (EXACT)
-# =====================
 EXIFTOOL_FIELDS = [
-    'IFD0:ImageDescription',
-
-    'XMP-iptcExt:ArtworkContentDescription',
-
-    'XMP-dc:Subject',
-    'XMP-dc:Description',
-    'XMP-dc:Creator',
-
-    'XMP-photoshop:CaptionWriter',
-    'XMP-photoshop:City',
-    'XMP-photoshop:State',
-    'XMP-photoshop:Country',
-
-    'XMP-iptcCore:Location',
-    'XMP-iptcCore:CountryCode',
-    'XMP-iptcCore:SubjectCode',
-    'XMP-iptcCore:ExtDescrAccessibility',
-
-    'XMP-lr:HierarchicalSubject',
-
-    'IPTC:CodedCharacterSet',
-    'IPTC:ApplicationRecordVersion',
-    'IPTC:Keywords',
-    'IPTC:City',
-    'IPTC:Sub-location',
-    'IPTC:Province-State',
-    'IPTC:Country-PrimaryLocationCode',
-    'IPTC:Country-PrimaryLocationName',
-    'IPTC:Caption-Abstract',
-    'IPTC:Writer-Editor',
+    "IFD0:ImageDescription",
+    "XMP-iptcExt:ArtworkContentDescription",
+    "XMP-dc:Subject",
+    "XMP-dc:Description",
+    "XMP-dc:Creator",
+    "XMP-photoshop:CaptionWriter",
+    "XMP-photoshop:City",
+    "XMP-photoshop:State",
+    "XMP-photoshop:Country",
+    "XMP-iptcCore:Location",
+    "XMP-iptcCore:CountryCode",
+    "XMP-iptcCore:SubjectCode",
+    "XMP-iptcCore:ExtDescrAccessibility",
+    "XMP-lr:HierarchicalSubject",
+    "IPTC:CodedCharacterSet",
+    "IPTC:ApplicationRecordVersion",
+    "IPTC:Keywords",
+    "IPTC:City",
+    "IPTC:Sub-location",
+    "IPTC:Province-State",
+    "IPTC:Country-PrimaryLocationCode",
+    "IPTC:Country-PrimaryLocationName",
+    "IPTC:Caption-Abstract",
+    "IPTC:Writer-Editor",
 ]
 
 OUTPUT_FILE = "metadata.tsv"
-FILE_EXTENSIONS = ('.tif', '.tiff', '.jpg', '.jpeg', '.png', '.mp4')
-
-# Set to True to include ALL fields (even empty ones) - useful for debugging
-INCLUDE_EMPTY_FIELDS = False
+FILE_EXTENSIONS = {".tif", ".tiff", ".jpg", ".jpeg", ".png", ".mp4"}
 
 
-def extract_metadata(file_path):
-    """Extract all metadata from a file using exiftool"""
+def extract_metadata(file_path: Path) -> dict:
     try:
         result = subprocess.run(
             [
-                'exiftool',
-                '-json',
-                '-a',
-                '-G1',
-                '-struct',
-                '-charset', 'UTF8',
-                *[f'-{tag}' for tag in EXIFTOOL_FIELDS],
-                file_path
+                "exiftool",
+                "-json",
+                "-a",
+                "-G1",
+                "-struct",
+                "-charset",
+                "UTF8",
+                *[f"-{tag}" for tag in EXIFTOOL_FIELDS],
+                str(file_path),
             ],
             capture_output=True,
             text=True,
-            check=True
+            check=True,
         )
 
         metadata = json.loads(result.stdout)
-        if metadata:
-            return metadata[0]
+        return metadata[0] if metadata else {}
+    except subprocess.CalledProcessError as exc:
+        print(f"Error reading {file_path}: {exc}")
         return {}
-    except subprocess.CalledProcessError as e:
-        print(f"Error reading {file_path}: {e}")
-        return {}
-    except json.JSONDecodeError as e:
-        print(f"Error parsing metadata for {file_path}: {e}")
+    except json.JSONDecodeError as exc:
+        print(f"Error parsing metadata for {file_path}: {exc}")
         return {}
 
 
-def find_files(base_dir, extensions=('.tif', '.tiff', '.jpg', '.jpeg', '.png', '.mp4')):
-    """Recursively find all files with specified extensions"""
-    files = []
-    for root, dirs, filenames in os.walk(base_dir):
-        for filename in filenames:
-            if filename.lower().endswith(extensions):
-                files.append(os.path.join(root, filename))
+def find_files(base_dir: Path, extensions: set[str]) -> list[Path]:
+    files: list[Path] = []
+    for path in base_dir.rglob("*"):
+        if path.is_file() and path.suffix.lower() in extensions:
+            files.append(path)
     return files
 
 
-def collect_all_metadata(files, progress=True):
-    """Collect metadata from all files and track which fields have values"""
+def collect_all_metadata(files: list[Path], progress: bool = True) -> list[dict]:
     all_metadata = []
-    field_has_value = defaultdict(bool)
     keyword_fields_found = set()
 
     total = len(files)
-    for i, file_path in enumerate(files, 1):
+    for idx, file_path in enumerate(files, 1):
         if progress:
-            print(f"Processing {i}/{total}: {os.path.basename(file_path)}")
+            print(f"Processing {idx}/{total}: {file_path.name}")
 
         metadata = extract_metadata(file_path)
-        if metadata:
-            # Add file path as first column (relative to Photo Albums)
-            if "Photo Albums" in file_path:
-                relative_path = "Photo Albums" + file_path.split("Photo Albums")[1]
-                metadata['FilePath'] = relative_path
-            else:
-                metadata['FilePath'] = file_path
-            all_metadata.append(metadata)
+        if not metadata:
+            continue
 
-            # Track which fields have non-empty values
-            for key, value in metadata.items():
-                if value and value != '' and value != [] and value != {}:
-                    field_has_value[key] = True
-                    # Track keyword-related fields
-                    if 'keyword' in key.lower() or 'subject' in key.lower() or 'tag' in key.lower():
-                        keyword_fields_found.add(key)
+        try:
+            rel_path = file_path.relative_to(PHOTO_ALBUMS_DIR)
+            metadata["FilePath"] = str(Path("Photo Albums") / rel_path)
+        except ValueError:
+            metadata["FilePath"] = str(file_path)
 
-    # Print keyword fields found
+        all_metadata.append(metadata)
+
+        for key, value in metadata.items():
+            if value not in ("", None, [], {}):
+                if "keyword" in key.lower() or "subject" in key.lower() or "tag" in key.lower():
+                    keyword_fields_found.add(key)
+
     if keyword_fields_found:
-        print(f"\nKeyword-related fields found with values:")
+        print("\nKeyword-related fields found with values:")
         for field in sorted(keyword_fields_found):
             print(f"  - {field}")
     else:
         print("\nWARNING: No keyword-related fields found with values!")
         print("Check if keywords are actually set in your files.")
 
-    return all_metadata, field_has_value
+    return all_metadata
 
 
-def write_tsv(all_metadata, output_file):
+def write_tsv(all_metadata: list[dict], output_file: str) -> None:
     if not all_metadata:
         print("No metadata found!")
         return
 
-    fields = ['FilePath'] + EXIFTOOL_FIELDS
+    fields = ["FilePath"] + EXIFTOOL_FIELDS
 
     print(f"\nWriting {len(all_metadata)} records with {len(fields)} fields to {output_file}")
 
-    with open(output_file, 'w', newline='', encoding='utf-8') as tsvfile:
-        writer = csv.DictWriter(tsvfile, fieldnames=fields, delimiter='\t', extrasaction='ignore')
+    with open(output_file, "w", newline="", encoding="utf-8") as tsvfile:
+        writer = csv.DictWriter(tsvfile, fieldnames=fields, delimiter="\t", extrasaction="ignore")
         writer.writeheader()
 
         for metadata in all_metadata:
             row = {}
             for field in fields:
-                value = metadata.get(field, '')
+                value = metadata.get(field, "")
                 if isinstance(value, (list, dict)):
                     row[field] = json.dumps(value, ensure_ascii=False)
                 else:
@@ -176,31 +142,28 @@ def write_tsv(all_metadata, output_file):
     print(f"Successfully wrote {output_file}")
 
 
-def main():
-    # Check if exiftool is available
+def main() -> None:
     try:
-        subprocess.run(['exiftool', '-ver'], capture_output=True, check=True)
+        subprocess.run(["exiftool", "-ver"], capture_output=True, check=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
         print("Error: exiftool is not installed or not in PATH")
         print("Install from: https://exiftool.org/")
         sys.exit(1)
 
-    # Validate directory
-    if not os.path.isdir(BASE_DIR):
-        print(f"Error: Directory does not exist: {BASE_DIR}")
+    if not PHOTO_ALBUMS_DIR.is_dir():
+        print(f"Error: Directory does not exist: {PHOTO_ALBUMS_DIR}")
         sys.exit(1)
 
     print("=" * 70)
     print("Metadata Extraction Tool")
     print("=" * 70)
-    print(f"Directory: {BASE_DIR}")
+    print(f"Directory: {PHOTO_ALBUMS_DIR}")
     print(f"Output: {OUTPUT_FILE}")
-    print(f"Extensions: {', '.join(FILE_EXTENSIONS)}")
+    print(f"Extensions: {', '.join(sorted(FILE_EXTENSIONS))}")
     print()
 
-    # Find all files
     print("Scanning for files...")
-    files = find_files(BASE_DIR, FILE_EXTENSIONS)
+    files = find_files(PHOTO_ALBUMS_DIR, FILE_EXTENSIONS)
     print(f"Found {len(files)} files")
 
     if not files:
@@ -209,10 +172,8 @@ def main():
 
     print()
 
-    # Collect metadata
-    all_metadata, field_has_value = collect_all_metadata(files, progress=True)
+    all_metadata = collect_all_metadata(files, progress=True)
 
-    # Write TSV
     print()
     write_tsv(all_metadata, OUTPUT_FILE)
 
@@ -221,5 +182,5 @@ def main():
     print("=" * 70)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

@@ -1,95 +1,67 @@
 import os
-import re
 import time
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
-import subprocess
 
-# Watch all book directories under this root.
-WATCH_ROOT = r"C:/Users/covec/OneDrive/Cordell, Leslie & Audrey/Photo Albums"
-INCOMING_NAME = "incoming_scan.tif"
+try:
+    from watchdog.events import FileSystemEventHandler
+    from watchdog.observers import Observer
+except Exception:
+    Observer = None
 
-# Regex to match filenames like: Europe_1973_Bxx_P05_S02.tif
-FILENAME_PATTERN = re.compile(
-    r"^(?P<prefix>.+)_P(?P<page>\d{2})_S(?P<scan>\d{2})\.tif$", re.IGNORECASE
+    class FileSystemEventHandler:
+        pass
+
+from common import (
+    FILENAME_PATTERN,
+    INCOMING_NAME,
+    PHOTO_ALBUMS_DIR,
+    get_next_filename,
+    open_image_fullscreen,
+    rename_with_retry,
 )
 
-def open_image_fullscreen(path):
-    # Adjust if your install path is different
-    xnview = r"C:\Program Files\XnViewMP\xnviewmp.exe"
-
-    if os.path.exists(xnview):
-        subprocess.Popen([xnview, path])
-    else:
-        # fallback to default viewer
-        os.startfile(path)
-
-def derive_prefix(dir_path):
-    base = os.path.basename(dir_path)
-    if base.lower().endswith("_archive"):
-        base = base[: -len("_archive")]
-    return base
-
-
-def get_next_filename(watch_dir):
-    """Determine the next filename based on existing files in the directory."""
-    files = [f for f in os.listdir(watch_dir) if f.lower().endswith(".tif")]
-
-    # Filter only files matching the naming pattern
-    valid_files = []
-    for f in files:
-        match = FILENAME_PATTERN.match(f)
-        if match:
-            valid_files.append(f)
-
-    if not valid_files:
-        # No files yet - start with cover (page 01, scan 01)
-        prefix = derive_prefix(watch_dir)
-        return f"{prefix}_P01_S01.tif"
-
-    # Sort alphabetically (works because numbers are zero-padded)
-    valid_files.sort()
-    last_file = valid_files[-1]
-
-    match = FILENAME_PATTERN.match(last_file)
-    prefix = match.group("prefix")
-    page = int(match.group("page"))
-    scan = int(match.group("scan"))
-
-    # Determine next scan/page (cover is single scan P01_S01)
-    if page == 1:
-        page = 2
-        scan = 1
-    else:
-        if scan < 2:
-            scan += 1
-        else:
-            page += 1
-            scan = 1
-
-    new_filename = f"{prefix}_P{page:02d}_S{scan:02d}.tif"
-    return new_filename
+WATCH_ROOT = str(PHOTO_ALBUMS_DIR)
 
 
 class IncomingScanHandler(FileSystemEventHandler):
+    def __init__(
+        self,
+        *,
+        get_next_filename_fn=get_next_filename,
+        rename_fn=rename_with_retry,
+        open_image_fn=open_image_fullscreen,
+        sleep_fn=time.sleep,
+        incoming_name=INCOMING_NAME,
+    ):
+        super().__init__()
+        self.get_next_filename_fn = get_next_filename_fn
+        self.rename_fn = rename_fn
+        self.open_image_fn = open_image_fn
+        self.sleep_fn = sleep_fn
+        self.incoming_name = incoming_name
+
     def on_created(self, event):
-        # Trigger only when incoming_scan.tif appears
         if event.is_directory:
             return
-        if os.path.basename(event.src_path).lower() == INCOMING_NAME.lower():
-            time.sleep(5.0)  # slight delay to ensure file is fully written
+        if os.path.basename(event.src_path).lower() != self.incoming_name.lower():
+            return
 
-            watch_dir = os.path.dirname(event.src_path)
-            new_name = get_next_filename(watch_dir)
-            old_path = os.path.join(watch_dir, INCOMING_NAME)
-            new_path = os.path.join(watch_dir, new_name)
+        self.sleep_fn(5.0)
 
-            print(f"Renaming {INCOMING_NAME} -> {new_name}")
-            os.rename(old_path, new_path)
-            open_image_fullscreen(new_path)
+        watch_dir = os.path.dirname(event.src_path)
+        new_name = self.get_next_filename_fn(watch_dir, FILENAME_PATTERN)
+        old_path = os.path.join(watch_dir, self.incoming_name)
+        new_path = os.path.join(watch_dir, new_name)
+
+        print(f"Renaming {self.incoming_name} -> {new_name}")
+        if not self.rename_fn(old_path, new_path, log_error=print):
+            return
+        self.open_image_fn(new_path, fallback_to_default=True)
 
 
-def main():
+def main() -> None:
+    if Observer is None:
+        raise RuntimeError("watchdog is required to run this script.")
+
     print(f"Watching for {INCOMING_NAME} in:")
     print(WATCH_ROOT)
 
@@ -109,5 +81,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
