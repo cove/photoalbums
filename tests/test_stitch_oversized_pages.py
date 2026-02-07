@@ -32,14 +32,14 @@ class TestStitchOversizedPages(unittest.TestCase):
         name = "EU_1973_B02_P05_D01_02.tif"
         self.assertEqual(
             sop.build_derived_output_name(name),
-            "1973_EU_B02_P05_D01_02.jpg",
+            "EU_1973_B02_P05_D01_02.jpg",
         )
 
     def test_build_derived_output_name_unknown(self):
         name = "EU_1973_Custom_D01_02.tif"
         self.assertEqual(
             sop.build_derived_output_name(name),
-            "1973_EU_Custom_D01_02_D01_02.jpg",
+            "EU_1973_Custom_D01_02_D01_02.jpg",
         )
 
     def test_get_view_dirname(self):

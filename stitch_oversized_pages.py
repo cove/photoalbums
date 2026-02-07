@@ -113,7 +113,7 @@ def build_derived_output_name(base: str) -> str:
     d2 = m_d.group("d2") if m_d else "00"
 
     if collection != "Unknown":
-        return f"{year}_{collection}_B{book}_P{int(page):02d}_D{d1}_{d2}.jpg"
+        return f"{collection}_{year}_B{book}_P{int(page):02d}_D{d1}_{d2}.jpg"
 
     stem, _ = os.path.splitext(base)
     m_view = re.match(
@@ -122,7 +122,7 @@ def build_derived_output_name(base: str) -> str:
     )
     if m_view:
         return (
-            f"{m_view.group('year')}_{m_view.group('collection')}_"
+            f"{m_view.group('collection')}_{m_view.group('year')}_"
             f"{m_view.group('rest')}_D{d1}_{d2}.jpg"
         )
     return f"{stem}_D{d1}_{d2}.jpg"
@@ -282,7 +282,7 @@ def tif_to_jpg(tif_path: str, output_dir: str) -> None:
     collection, year, book, page = parse_album_filename(tif_path)
     out = os.path.join(
         output_dir,
-        f"{year}_{collection}_B{book}_P{int(page):02d}.jpg",
+        f"{collection}_{year}_B{book}_P{int(page):02d}.jpg",
     )
 
     scan_nums = extract_scan_numbers([tif_path]) or [1]
@@ -369,7 +369,7 @@ def stitch(files, output_dir: str) -> None:
 
     out = os.path.join(
         output_dir,
-        f"{year}_{collection}_B{book}_P{int(page):02d}_stitched.jpg",
+        f"{collection}_{year}_B{book}_P{int(page):02d}_stitched.jpg",
     )
 
     scan_nums = extract_scan_numbers(files)
@@ -380,7 +380,7 @@ def stitch(files, output_dir: str) -> None:
         return
 
     attempts = [
-        {"detector": "sift", "confidence_threshold": 0.5},
+       # {"detector": "sift", "confidence_threshold": 0.5},
         {"detector": "sift", "confidence_threshold": 0.3},
         {"detector": "sift", "confidence_threshold": 0.1},
         {"detector": "brisk", "confidence_threshold": 0.1},
@@ -468,7 +468,7 @@ def main() -> None:
         for group in failed:
             if group:
                 collection, year, book, page = parse_album_filename(group[0])
-                base = f"{year}_{collection}_B{book}_P{int(page):02d}"
+                base = f"{collection}_{year}_B{book}_P{int(page):02d}"
             else:
                 base = "Unknown"
             print(f"FAILED: {base}")
